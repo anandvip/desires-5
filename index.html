@@ -451,6 +451,7 @@
             addDoc,
             deleteDoc,
             doc,
+            setDoc,
             query,
             where,
             orderBy,
@@ -516,6 +517,7 @@
             constructor() {
                 this.desires = [];
                 this.currentUser = null;
+                this.db = getFirestore();
             }
 
             async addDesire(desireData) {
@@ -528,7 +530,7 @@
                 };
 
                 try {
-                    await addDoc(collection(db, 'desires'), desire);
+                    await addDoc(collection(db, 'users', this.currentUser.uid, 'desires'), desire);
                     await this.loadDesires();
                     return true;
                 } catch (error) {
@@ -541,7 +543,7 @@
                 if (!this.currentUser) throw new Error('User not authenticated');
 
                 try {
-                    await deleteDoc(doc(db, 'desires', id));
+                    await deleteDoc(doc(db, 'users', this.currentUser.uid, 'desires', id));
                     await this.loadDesires();
                     return true;
                 } catch (error) {
@@ -552,26 +554,48 @@
 
             async loadDesires() {
                 if (!this.currentUser) {
+                    console.log('No user logged in');
                     this.desires = [];
                     return;
                 }
 
                 try {
-                    const q = query(
-                        collection(db, 'desires'),
-                        where('userId', '==', this.currentUser.uid),
-                        orderBy('createdAt', 'desc')
-                    );
+                    // Log authentication state
+                    console.log('Current User:', {
+                        uid: this.currentUser.uid,
+                        email: this.currentUser.email,
+                        isAnonymous: this.currentUser.isAnonymous,
+                        emailVerified: this.currentUser.emailVerified
+                    });
+
+                    // Reference to the desires collection
+                    const desiresRef = collection(db, `users/${this.currentUser.uid}/desires`);
+                    console.log('Collection path:', `users/${this.currentUser.uid}/desires`);
+
+                    // Query the collection
+                    const q = query(desiresRef, orderBy('createdAt', 'desc'));
                     
                     const snapshot = await getDocs(q);
+                    console.log('Query snapshot:', {
+                        empty: snapshot.empty,
+                        size: snapshot.size
+                    });
+
                     this.desires = snapshot.docs.map(doc => ({
                         id: doc.id,
                         ...doc.data()
                     }));
                 } catch (error) {
-                    console.error('Error loading desires:', error);
+                    console.error('Detailed error:', {
+                        code: error.code,
+                        message: error.message,
+                        name: error.name,
+                        stack: error.stack,
+                        path: `users/${this.currentUser?.uid}/desires`
+                    });
                     throw error;
                 }
+            }
             }
 
             setCurrentUser(user) {
@@ -725,6 +749,12 @@
 
             initializeAuth() {
                 onAuthStateChanged(auth, async (user) => {
+                    console.log('Auth state changed:', user ? {
+                        uid: user.uid,
+                        email: user.email,
+                        provider: user.providerData[0]?.providerId
+                    } : 'No user');
+                    
                     this.desireManager.setCurrentUser(user);
                     this.uiManager.updateAuthUI(user);
                     
@@ -734,6 +764,7 @@
                             await this.desireManager.loadDesires();
                             this.uiManager.renderDesires();
                         } catch (error) {
+                            console.error('Load error:', error);
                             utils.showToast('Failed to load desires', 'error');
                         } finally {
                             utils.hideLoading();
